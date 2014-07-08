@@ -7,6 +7,8 @@
 import System.IO
 import System.Directory
 import Network.HTTP.Conduit
+import Control.Lens
+import Control.Monad
 import Control.Monad.Trans.Resource
 import Control.Concurrent hiding (yield)
 import Control.Exception.Lifted
@@ -22,24 +24,25 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL
 import Data.Function
 import Data.Conduit
-import qualified Data.Conduit.List as CL
 import Text.Feed.Import
 import Text.Feed.Types
 import Text.RSS.Syntax
 import Data.Time
 import Data.List
+import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Lens as JSON
 import Data.Maybe
 import System.Locale
 
 createTwInfo :: FilePath -> IO TWInfo
 createTwInfo cfg = do
-    ck:cs:at:as:_ <- S.lines <$> S.readFile cfg
+    ck:cs:ak:as:_ <- S.lines <$> S.readFile cfg
     let tokens = twitterOAuth
             { oauthConsumerKey    = key ck
             , oauthConsumerSecret = key cs
             }
         credential = Credential 
-            [ ("oauth_token",        key at)
+            [ ("oauth_token",        key ak)
             , ("oauth_token_secret", key as)
             ]
 
@@ -51,16 +54,16 @@ createTwInfo cfg = do
       key = S.takeWhile (`notElem` "\n\r")
 
 updateFromChan :: (MonadResource m, MonadLogger m, MonadIO m, MonadBaseControl IO m)
-               => Chan T.Text -> TW m b
-updateFromChan chan = loop `catch` (\(e :: SomeException) -> do
+               => Int -> Chan RSSItem -> TW m b
+updateFromChan len chan = loop `catch` (\(e :: SomeException) -> do
     liftIO $ print e
     liftIO $ threadDelay (300 * 10^(6::Int))
-    updateFromChan chan
+    updateFromChan len chan
     )
   where
     loop = do
         t <- liftIO $ readChan chan
-        _ <- call $ update t
+        _ <- maybe (return ()) (void . call . update) (formatTwitter len t)
         loop
 
 sinkChan :: MonadIO m => Chan i -> Consumer i m ()
@@ -96,14 +99,14 @@ sourceFeed req mgr mvar = loop `catchC` (\(e::SomeException) -> do
             _ -> return ()
         loop
 
-formatTwitter :: RSSItem -> Maybe T.Text
-formatTwitter f = do
+formatTwitter :: Int -> RSSItem -> Maybe T.Text
+formatTwitter len f = do
     title  <- T.pack <$> rssItemTitle f
     author <- T.pack . takeWhile (/= ',') . drop 12 <$> rssItemDescription f
     desc   <- snd . T.breakOnEnd "</i><p>" . T.pack <$> rssItemDescription f
     url    <- T.pack <$> rssItemLink f
     let body = T.concat [title, ", ", author, ", ", desc]
-    return $ T.take (139 - T.length url) body `T.append` (' ' `T.cons` url)
+    return $ T.take (140 - len) (body `T.snoc` ' ') `T.append` url
 
 main :: IO ()
 main = do 
@@ -115,6 +118,8 @@ main = do
         False -> return $ read "1999-07-08 12:03:58.434011 UTC"
     mvar   <- newMVar ct
     _      <- forkIO $ withManager $ \mgr ->
-        sourceFeed req mgr mvar $= CL.mapMaybe formatTwitter $$ sinkChan chan
+        sourceFeed req mgr mvar $$ sinkChan chan
     runNoLoggingT . runTW twInfo $ do
-        updateFromChan chan
+        conf <- call $ APIRequestGet "https://api.twitter.com/1.1/help/configuration.json" []
+        let len = (conf :: JSON.Value) ^?! JSON.key "short_url_length_https" . JSON._Integer
+        updateFromChan (fromIntegral len) chan

@@ -32,6 +32,8 @@ executable hackage2twitter
                      , feed               >=0.3   && <0.4
                      , time               >=1.4   && <1.5
                      , old-locale         >=1.0   && <1.1
+                     , aeson              >=0.7   && <0.8
+                     , lens               >=4.2   && <4.3
   ghc-options:         -Wall -O2 -threaded
   -- hs-source-dirs:      
   default-language:    Haskell2010
