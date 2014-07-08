@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
 
+import System.IO
 import System.Directory
 import Network.HTTP.Conduit
 import Control.Monad.Trans.Resource
@@ -85,6 +86,7 @@ sourceFeed req mgr mvar = loop `catchC` (\(e::SomeException) -> do
                 let new = filter ((> lastTime) . fst) items'
                 mapM_ (yield . snd) $ sortBy (compare `on` fst) new
                 liftIO $ putStrLn $ "yield " ++ show (length new) ++ " packages."
+                liftIO $ hFlush stdout
                 liftIO $ modifyMVar_ mvar (\_ -> do
                     let newTime = maximum $ map fst items'
                     writeFile "time.txt" $ show newTime
