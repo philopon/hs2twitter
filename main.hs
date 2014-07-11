@@ -111,15 +111,15 @@ formatTwitter len f = do
 main :: IO ()
 main = do 
     chan   <- liftIO newChan
-    twInfo <- createTwInfo "tokens.txt"
-    req    <- parseUrl "https://hackage.haskell.org/packages/recent.rss"
+    twInfo <- createTwInfo  "tokens.txt"
+    req    <- parseUrl      "https://hackage.haskell.org/packages/recent.rss"
     ct     <- doesFileExist "time.txt" >>= \case
-        True  -> read <$> readFile "time.txt"
-        False -> return $ read "1999-07-08 12:03:58.434011 UTC"
+        True  -> read  <$> readFile "time.txt"
+        False -> return $  read "1990-01-01 00:00:00.000000 UTC"
     mvar   <- newMVar ct
     _      <- forkIO $ withManager $ \mgr ->
         sourceFeed req mgr mvar $$ sinkChan chan
     runNoLoggingT . runTW twInfo $ do
         conf <- call $ APIRequestGet "https://api.twitter.com/1.1/help/configuration.json" []
-        let len = (conf :: JSON.Value) ^?! JSON.key "short_url_length_https" . JSON._Integer
-        updateFromChan (fromIntegral len) chan
+        let len = (conf :: JSON.Value) ^? JSON.key "short_url_length_https" . JSON._Integer
+        updateFromChan (maybe 25 fromIntegral len) chan
